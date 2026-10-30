@@ -1,0 +1,197 @@
+<!doctype html>
+<html lang="es">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>PoliClima · Panel de monitoreo climático</title>
+  <script>document.documentElement.classList.add("js");</script> <!-- marca que JavaScript está activo -->
+
+  <!-- Librerías: Tailwind (estilos) y Chart.js (gráficas) -->
+  <script src="https://cdn.tailwindcss.com"></script>
+  <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.3"></script>
+  <link href="https://fonts.googleapis.com/css2?family=Plus+Jakarta+Sans:wght@400;500;700;800&display=swap" rel="stylesheet">
+
+  <!-- Colores del Politécnico Grancolombiano (tomados del logo) -->
+  <script>
+    tailwind.config = { theme: { extend: { colors: { poli: { azul: "#232a5c", turquesa: "#14a3c7", claro: "#e8f5fa" } } } } };
+  </script>
+
+  <style>
+    html { scroll-behavior: smooth; }
+    body { font-family: 'Plus Jakarta Sans', system-ui, sans-serif; }
+
+    /* Entrada al abrir la página: cada bloque .aparece sube y se desvanece, uno tras otro */
+    .aparece { opacity: 0; transform: translateY(12px); animation: subir .6s ease forwards; }
+    @keyframes subir { to { opacity: 1; transform: none; } }
+
+    /* Aviso de datos faltantes: se muestra con un fundido cuando cambia el texto */
+    .fundido { animation: subir .5s ease forwards; }
+
+    /* Bloques de «¿Cómo funciona?»: aparecen cuando la persona llega a ellos al bajar.
+       Solo se ocultan si JavaScript está activo (clase «js»), para que nunca queden invisibles */
+    .js .revelar { opacity: 0; transform: translateY(20px); transition: opacity .7s ease, transform .7s ease; }
+    .js .revelar.visible { opacity: 1; transform: none; }
+
+    /* El dato estimado del ejemplo late suavemente para llamar la atención */
+    @keyframes latido { 0%, 100% { transform: scale(1); } 50% { transform: scale(1.12); } }
+    .estimado { display: inline-block; animation: latido 1.8s ease-in-out infinite; }
+
+    /* Respeta a quienes tienen desactivadas las animaciones en su sistema */
+    @media (prefers-reduced-motion: reduce) {
+      html { scroll-behavior: auto; }
+      .aparece, .fundido, .revelar { animation: none; opacity: 1; transform: none; transition: none; }
+      .estimado { animation: none; }
+    }
+  </style>
+</head>
+
+<body class="bg-[#f3f7fb] text-poli-azul min-h-screen">
+
+  <!-- ENCABEZADO: logo de PoliClima, nombre del panel y periodo de los datos -->
+  <header class="bg-white border-b-4 border-poli-turquesa">
+    <div class="max-w-6xl mx-auto px-4 sm:px-6 py-3 flex flex-wrap items-center gap-4">
+      <img src="/static/logo.png" alt="PoliClima — Politécnico Grancolombiano" class="h-16 w-auto">
+      <div class="border-l border-slate-200 pl-4 flex-1 min-w-[220px]">
+        <h1 class="text-xl font-extrabold">Panel de monitoreo climático</h1>
+        <p id="periodo" class="text-sm text-slate-500">Carga un archivo para comenzar.</p>
+      </div>
+      <a href="#como" class="text-sm font-bold text-poli-azul border-2 border-poli-turquesa rounded-lg px-4 py-2 hover:bg-poli-turquesa hover:text-white transition-colors duration-300">¿Cómo funciona?</a>
+    </div>
+  </header>
+
+  <main class="max-w-6xl mx-auto p-4 sm:p-6 space-y-5">
+
+    <!-- CARGA DE ARCHIVOS: botón y zona para arrastrar (CSV, Excel, JSON) -->
+    <section id="zona" class="aparece bg-white rounded-xl border-2 border-dashed border-poli-turquesa/60 p-5
+                              flex flex-wrap items-center gap-4 transition-all duration-300">
+      <div class="flex-1 min-w-[220px]">
+        <h2 class="font-bold">Cargar datos: arrastra aquí tu archivo (CSV, Excel o JSON)</h2>
+        <p id="archivo" class="text-sm font-medium text-poli-turquesa mt-1"></p>
+        <p id="error" class="text-sm font-medium text-red-600 mt-1"></p>
+      </div>
+      <input id="entrada" type="file" accept=".csv,.txt,.tsv,.xlsx,.xls,.json" class="hidden">
+      <button id="boton" class="bg-poli-azul text-white font-bold rounded-lg px-5 py-2.5
+                                hover:bg-poli-turquesa transition-colors duration-300">Elegir archivo</button>
+    </section>
+
+    <!-- FILTROS: rango de fechas y de horas. Todo el panel se recalcula al cambiarlos -->
+    <section class="aparece bg-white rounded-xl border border-sky-100 p-4" style="animation-delay:.05s">
+      <div class="flex flex-wrap items-end gap-4">
+        <label class="text-sm text-slate-500">Desde
+          <input id="desde" type="date" class="block border border-sky-200 rounded-lg px-2 py-1 text-poli-azul">
+        </label>
+        <label class="text-sm text-slate-500">Hasta
+          <input id="hasta" type="date" class="block border border-sky-200 rounded-lg px-2 py-1 text-poli-azul">
+        </label>
+        <label class="text-sm text-slate-500">Hora inicial
+          <select id="h-desde" class="block border border-sky-200 rounded-lg px-2 py-1 text-poli-azul"></select>
+        </label>
+        <label class="text-sm text-slate-500">Hora final
+          <select id="h-hasta" class="block border border-sky-200 rounded-lg px-2 py-1 text-poli-azul"></select>
+        </label>
+        <div class="flex flex-wrap gap-2 ml-auto">
+          <button data-dias="7" class="rapido text-sm border border-poli-turquesa rounded-full px-3 py-1 hover:bg-poli-claro transition-colors">Últimos 7 días</button>
+          <button data-dias="30" class="rapido text-sm border border-poli-turquesa rounded-full px-3 py-1 hover:bg-poli-claro transition-colors">Últimos 30 días</button>
+          <button id="quitar" class="text-sm bg-poli-claro rounded-full px-3 py-1 font-bold hover:bg-poli-turquesa hover:text-white transition-colors">Quitar filtros</button>
+        </div>
+      </div>
+      <p id="filtro-info" class="text-xs text-slate-500 mt-2"></p>
+    </section>
+
+    <!-- TARJETAS: indicadores principales (los números se animan al cambiar) -->
+    <section class="grid grid-cols-2 lg:grid-cols-4 gap-4">
+      <article class="aparece bg-white rounded-xl border border-sky-100 p-4" style="animation-delay:.1s">
+        <p class="text-sm text-slate-500">Temperatura media</p>
+        <p class="text-3xl font-extrabold"><span id="temp">–</span><span class="text-base"> °C</span></p>
+      </article>
+      <article class="aparece bg-white rounded-xl border border-sky-100 p-4" style="animation-delay:.2s">
+        <p class="text-sm text-slate-500">Precipitación acumulada</p>
+        <p class="text-3xl font-extrabold"><span id="lluvia">–</span><span class="text-base"> mm</span></p>
+      </article>
+      <article class="aparece bg-white rounded-xl border border-sky-100 p-4" style="animation-delay:.3s">
+        <p class="text-sm text-slate-500">Humedad relativa media</p>
+        <p class="text-3xl font-extrabold"><span id="hum">–</span><span class="text-base"> %</span></p>
+      </article>
+      <article class="aparece bg-white rounded-xl border border-sky-100 p-4" style="animation-delay:.4s">
+        <p class="text-sm text-slate-500">Calidad de datos</p>
+        <p class="text-3xl font-extrabold"><span id="calidad">–</span><span class="text-base"> %</span></p>
+      </article>
+    </section>
+
+    <!-- ALERTAS: UV, lluvia y temperatura del último día del rango elegido -->
+    <section class="aparece" style="animation-delay:.45s">
+      <h2 class="font-bold mb-2">Alertas ambientales <span id="alertas-fecha" class="text-sm font-normal text-slate-500"></span></h2>
+      <div id="alertas" class="grid md:grid-cols-3 gap-4"></div>
+    </section>
+
+    <section class="grid lg:grid-cols-3 gap-4">
+
+      <!-- GRÁFICA: variable y forma de verla elegidas por la persona -->
+      <article class="aparece lg:col-span-2 bg-white rounded-xl border border-sky-100 p-4" style="animation-delay:.5s">
+        <div class="flex flex-wrap items-center justify-between gap-2 mb-3">
+          <h2 id="titulo" class="font-bold">Gráfica diaria</h2>
+          <div class="flex gap-2">
+            <select id="variable" class="border border-sky-200 rounded-lg px-2 py-1 text-sm"></select>
+            <select id="vista" class="border border-sky-200 rounded-lg px-2 py-1 text-sm">
+              <option value="dia">Por día</option>
+              <option value="hora">Ciclo del día (por hora)</option>
+            </select>
+          </div>
+        </div>
+        <div class="h-72"><canvas id="grafica"></canvas></div>
+        <p class="text-sm font-medium mt-2" style="color:#b45309"><span class="inline-block w-3 h-3 rounded-full bg-[#f59e0b] align-middle mr-1"></span>Punto naranja = dato con valores interpolados</p>
+      </article>
+
+      <!-- DATOS FALTANTES: completitud y aviso de interpolación -->
+      <article class="aparece bg-white rounded-xl border border-sky-100 p-4" style="animation-delay:.6s">
+        <h2 class="font-bold mb-3">Datos faltantes</h2>
+        <p class="text-sm text-slate-500">Completitud original</p>
+        <p class="text-xl font-extrabold mb-2"><span id="c-orig">–</span> %</p>
+        <p class="text-sm text-slate-500">Completitud después de interpolar</p>
+        <p class="text-xl font-extrabold mb-2"><span id="c-final">–</span> %</p>
+        <div class="h-2 bg-slate-100 rounded-full mb-4 overflow-hidden"><div id="barra" class="h-2 bg-poli-turquesa rounded-full transition-all duration-1000" style="width:0%"></div></div>
+        <div id="aviso" class="rounded-lg bg-poli-claro text-sm p-3">Aún no hay datos cargados.</div>
+      </article>
+    </section>
+
+    <!-- TABLA: resumen de cada variable del archivo -->
+    <section class="aparece bg-white rounded-xl border border-sky-100 p-4 overflow-x-auto" style="animation-delay:.7s">
+      <h2 class="font-bold mb-3">Resumen por variable</h2>
+      <table class="w-full text-sm text-left">
+        <thead class="text-slate-500">
+          <tr><th class="py-2 pr-4">Variable</th><th class="pr-4">Rango observado</th><th class="pr-4">Media</th><th class="pr-4">Faltantes</th><th>Tratamiento</th></tr>
+        </thead>
+        <tbody id="tabla"></tbody>
+      </table>
+      <p class="text-xs text-slate-500 mt-2">Las medias y los rangos usan solo datos medidos, sin interpolar.</p>
+    </section>
+
+    <!-- EXPLICACIÓN: cómo funciona PoliClima, en palabras sencillas -->
+    <section id="como" class="pt-6">
+      <h2 class="text-2xl font-extrabold mb-4 revelar">¿Cómo funciona PoliClima?</h2>
+      <div class="grid md:grid-cols-2 gap-4">
+        <article class="revelar bg-white rounded-xl border border-sky-100 p-5">
+          <h3 class="font-bold mb-1">1. Subes el archivo</h3>
+          <p class="text-sm text-slate-600">Arrastra el archivo que exporta la estación (CSV, Excel o JSON). Puede traer líneas de título y fechas con AM/PM: no hace falta arreglarlo antes.</p>
+        </article>
+        <article class="revelar bg-white rounded-xl border border-sky-100 p-5">
+          <h3 class="font-bold mb-1">2. Se limpia</h3>
+          <p class="text-sm text-slate-600">PoliClima salta los títulos, entiende las fechas, toma «--» como dato faltante y arma una lista completa con un registro cada 15 minutos.</p>
+        </article>
+        <article class="revelar bg-white rounded-xl border border-sky-100 p-5">
+          <h3 class="font-bold mb-1">3. Se estiman los huecos cortos</h3>
+          <p class="text-sm text-slate-600">Si un hueco es corto, se estima con una línea entre el dato anterior y el siguiente. Los huecos largos y la lluvia se dejan vacíos para no inventar datos. Lo estimado aparece en naranja.</p>
+          <p class="text-sm mt-3 bg-poli-claro rounded-lg p-3">14,0 °C → <b class="estimado text-[#b45309]">14,5 °C</b> → 15,0 °C<br><span class="text-slate-500">Ejemplo: a las 12:15 falta el dato y se estima con sus vecinos de las 12:00 y las 12:30.</span></p>
+        </article>
+        <article class="revelar bg-white rounded-xl border border-sky-100 p-5">
+          <h3 class="font-bold mb-1">4. Lo ves y lo filtras</h3>
+          <p class="text-sm text-slate-600">Las tarjetas, las alertas, la gráfica y la tabla se calculan con el rango de fechas y horas que elijas arriba. Las alertas usan el último día de ese rango.</p>
+          <p class="text-sm text-slate-600 mt-2">UV sigue la escala de la OMS. Los umbrales de lluvia y temperatura son de referencia y se ajustan en <b>app.py</b>.</p>
+        </article>
+      </div>
+    </section>
+  </main>
+
+  <script src="/static/app.js"></script>
+</body>
+</html>
